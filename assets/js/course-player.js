@@ -43,6 +43,23 @@ document.addEventListener('DOMContentLoaded', function() {
     let pauseStartTime = null; // Track when user paused
     let totalPauseTime = 0; // Total time paused
     
+    // Detailed video analytics tracking
+    let videoAnalytics = {
+        playEvents: 0,
+        pauseEvents: 0,
+        seekEvents: 0,
+        totalSeekTime: 0,
+        bufferingEvents: 0,
+        totalBufferingTime: 0,
+        playbackSpeedChanges: 0,
+        maxPlaybackSpeed: 1.0,
+        minPlaybackSpeed: 1.0,
+        averageVolume: 0,
+        volumeChanges: 0,
+        watchSegments: [], // Track which parts of video were watched
+        skippedSegments: [] // Track which parts were skipped
+    };
+    
     // Get course ID from URL parameter
     const urlParams = new URLSearchParams(window.location.search);
     const courseId = urlParams.get('courseId');
@@ -268,6 +285,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     totalLessonTime = (currentTime - lessonStartTime) / 1000; // Convert to seconds
                     saveLessonAnalytics(courseId, currentLesson.id, totalLessonTime, watchedTime);
                 }
+                
+                // Save detailed video analytics
+                saveVideoAnalytics(courseId, currentLesson.id);
             }
         }
         
@@ -293,6 +313,9 @@ document.addEventListener('DOMContentLoaded', function() {
         totalLessonTime = 0;
         pauseStartTime = null;
         totalPauseTime = 0;
+        
+        // Reset video analytics
+        resetVideoAnalytics();
         
         console.log('Setting minWatchTime from lesson:', lesson.minWatchTime, 'Final minWatchTime:', minWatchTime);
         
@@ -414,7 +437,10 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             events: {
                 'onReady': onPlayerReady,
-                'onStateChange': onPlayerStateChange
+                'onStateChange': onPlayerStateChange,
+                'onPlaybackQualityChange': onPlaybackQualityChange,
+                'onPlaybackRateChange': onPlaybackRateChange,
+                'onError': onPlayerError
             }
         });
     }
@@ -434,6 +460,9 @@ document.addEventListener('DOMContentLoaded', function() {
             markCompleteBtn.onclick = () => markLessonComplete(lesson.id);
             console.log('Button enabled on player ready - time requirement already met');
         }
+        
+        // Track play event
+        videoAnalytics.playEvents++;
     }
     
     // YouTube player state change event
@@ -456,6 +485,9 @@ document.addEventListener('DOMContentLoaded', function() {
             
             console.log('Video started playing at:', watchStartTime);
             
+            // Track play event
+            videoAnalytics.playEvents++;
+            
             // Start continuous tracking of watched time
             startWatchTimeTracking();
         } else if (event.data == YT.PlayerState.PAUSED) {
@@ -470,6 +502,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 // Track pause time
                 pauseStartTime = new Date();
+                
+                // Track pause event
+                videoAnalytics.pauseEvents++;
                 
                 console.log('Video paused. Watched time so far:', watchedTime, 'seconds');
                 
@@ -502,13 +537,47 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Save detailed analytics
                 saveLessonAnalytics(courseId, lesson.id, totalLessonTime, watchedTime);
                 
+                // Save detailed video analytics
+                saveVideoAnalytics(courseId, lesson.id);
+                
                 // Update button visibility based on watched time
                 updateButtonVisibility(lesson);
             }
+        } else if (event.data == YT.PlayerState.BUFFERING) {
+            // Track buffering event
+            videoAnalytics.bufferingEvents++;
+            console.log('Video buffering');
         } else {
             // For other states, just update the button visibility
             updateButtonVisibility(lesson);
         }
+    }
+    
+    // YouTube player playback quality change event
+    function onPlaybackQualityChange(event) {
+        console.log('Playback quality changed:', event.data);
+        // Could track this for analytics if needed
+    }
+    
+    // YouTube player playback rate change event
+    function onPlaybackRateChange(event) {
+        console.log('Playback rate changed:', event.data);
+        // Track playback speed changes
+        videoAnalytics.playbackSpeedChanges++;
+        
+        // Update max/min playback speed
+        if (event.data > videoAnalytics.maxPlaybackSpeed) {
+            videoAnalytics.maxPlaybackSpeed = event.data;
+        }
+        if (event.data < videoAnalytics.minPlaybackSpeed) {
+            videoAnalytics.minPlaybackSpeed = event.data;
+        }
+    }
+    
+    // YouTube player error event
+    function onPlayerError(event) {
+        console.error('YouTube player error:', event.data);
+        // Could track this for analytics if needed
     }
     
     // Continuous watch time tracking
@@ -772,6 +841,39 @@ document.addEventListener('DOMContentLoaded', function() {
             // Also update user's overall analytics
             updateUserOverallAnalytics(courseId, lessonId, totalTime, watchedTime >= minWatchTime);
         }
+    }
+    
+    // Save detailed video analytics to Firebase
+    function saveVideoAnalytics(courseId, lessonId) {
+        if (currentUser && courseId && lessonId) {
+            firebaseServices.updateVideoAnalytics(
+                currentUser.uid,
+                courseId,
+                lessonId,
+                videoAnalytics
+            ).catch(error => {
+                console.error('Error saving video analytics:', error);
+            });
+        }
+    }
+    
+    // Reset video analytics for new lesson
+    function resetVideoAnalytics() {
+        videoAnalytics = {
+            playEvents: 0,
+            pauseEvents: 0,
+            seekEvents: 0,
+            totalSeekTime: 0,
+            bufferingEvents: 0,
+            totalBufferingTime: 0,
+            playbackSpeedChanges: 0,
+            maxPlaybackSpeed: 1.0,
+            minPlaybackSpeed: 1.0,
+            averageVolume: 0,
+            volumeChanges: 0,
+            watchSegments: [], // Track which parts of video were watched
+            skippedSegments: [] // Track which parts were skipped
+        };
     }
     
     // Update user's overall analytics
@@ -1080,6 +1182,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const currentLesson = currentCourse.lessons[currentLessonIndex];
             if (currentLesson) {
                 saveWatchedTimeToLocalStorage(courseId, currentLesson.id, watchedTime);
+                
+                // Save detailed video analytics
+                saveVideoAnalytics(courseId, currentLesson.id);
             }
         }
     });

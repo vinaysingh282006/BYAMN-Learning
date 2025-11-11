@@ -248,6 +248,26 @@ window.firebaseServices = {
         }
     },
 
+    // Function to update video analytics
+    updateVideoAnalytics: async (userId, courseId, lessonId, videoAnalytics) => {
+        try {
+            const { ref, update } = await import("firebase/database");
+            
+            // Update video-specific analytics
+            const videoAnalyticsRef = ref(rtdb, `userAnalytics/${userId}/videoDetails/${courseId}/${lessonId}`);
+            const videoData = {
+                ...videoAnalytics,
+                lastUpdated: new Date().toISOString()
+            };
+            await update(videoAnalyticsRef, videoData);
+            
+            return true;
+        } catch (error) {
+            console.error('Error updating video analytics:', error);
+            throw error;
+        }
+    },
+
     // Function to update course completion analytics
     updateCourseCompletionAnalytics: async (userId, courseId) => {
         try {

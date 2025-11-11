@@ -21,6 +21,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const activityChartContainer = document.getElementById('activity-chart-container');
     const streakChartContainer = document.getElementById('streak-chart-container');
     
+    // Video analytics elements
+    const videoAnalyticsContainer = document.getElementById('video-analytics-container');
+    const totalPlayEventsElement = document.getElementById('total-play-events');
+    const totalPauseEventsElement = document.getElementById('total-pause-events');
+    const avgPlaybackSpeedElement = document.getElementById('avg-playback-speed');
+    const totalSeekEventsElement = document.getElementById('total-seek-events');
+    const engagementScoreElement = document.getElementById('engagement-score');
+    
     // Check auth state
     firebaseServices.onAuthStateChanged((user) => {
         if (user) {
@@ -29,7 +37,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Update user name in header
             if (userNameElement) {
-                userNameElement.textContent = `Welcome, ${user.displayName || user.email}`;
+                userNameNameElement.textContent = `Welcome, ${user.displayName || user.email}`;
             }
             
             // Load user's enrollments
@@ -66,6 +74,9 @@ document.addEventListener('DOMContentLoaded', function() {
             // Update analytics stats
             updateAnalyticsStats(userAnalytics);
             
+            // Update video analytics stats
+            updateVideoAnalyticsStats(userAnalytics);
+            
             // Render courses
             renderCourses(userEnrollments, courses, categoryMap);
             
@@ -74,6 +85,9 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Render analytics charts
             renderAnalyticsCharts(userAnalytics);
+            
+            // Render video analytics charts
+            renderVideoAnalyticsCharts(userAnalytics);
         })
         .catch((error) => {
             console.error('Error loading dashboard data:', error);
@@ -164,6 +178,62 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
+    // Update video analytics stats
+    function updateVideoAnalyticsStats(analytics) {
+        if (!analytics || !analytics.videoDetails) {
+            // Set default values if no video analytics data
+            if (totalPlayEventsElement) totalPlayEventsElement.textContent = '0';
+            if (totalPauseEventsElement) totalPauseEventsElement.textContent = '0';
+            if (avgPlaybackSpeedElement) avgPlaybackSpeedElement.textContent = '1.0x';
+            if (totalSeekEventsElement) totalSeekEventsElement.textContent = '0';
+            if (engagementScoreElement) engagementScoreElement.textContent = '0%';
+            return;
+        }
+        
+        // Aggregate video analytics from all lessons
+        let totalPlayEvents = 0;
+        let totalPauseEvents = 0;
+        let totalSpeedChanges = 0;
+        let totalSpeedSum = 0;
+        let totalSeekEvents = 0;
+        let totalLessonsWithVideoData = 0;
+        let engagementScore = 0;
+        
+        // Process video details for each course and lesson
+        Object.values(analytics.videoDetails || {}).forEach(course => {
+            Object.values(course || {}).forEach(lesson => {
+                if (lesson) {
+                    totalPlayEvents += lesson.playEvents || 0;
+                    totalPauseEvents += lesson.pauseEvents || 0;
+                    totalSeekEvents += lesson.seekEvents || 0;
+                    
+                    // Calculate average playback speed
+                    if (lesson.playbackSpeedChanges > 0) {
+                        totalSpeedChanges += lesson.playbackSpeedChanges || 0;
+                        totalSpeedSum += (lesson.maxPlaybackSpeed + lesson.minPlaybackSpeed) / 2;
+                        totalLessonsWithVideoData++;
+                    }
+                }
+            });
+        });
+        
+        // Calculate engagement score (simplified formula)
+        // Based on play/pause ratio and seek events (fewer seeks = more engaged)
+        const playPauseRatio = totalPauseEvents > 0 ? totalPlayEvents / totalPauseEvents : totalPlayEvents;
+        const seekPenalty = Math.min(100, totalSeekEvents / 10); // Penalty for excessive seeking
+        engagementScore = Math.max(0, Math.min(100, (playPauseRatio * 10) - seekPenalty));
+        
+        // Update UI elements
+        if (totalPlayEventsElement) totalPlayEventsElement.textContent = totalPlayEvents;
+        if (totalPauseEventsElement) totalPauseEventsElement.textContent = totalPauseEvents;
+        if (avgPlaybackSpeedElement) {
+            const avgSpeed = totalLessonsWithVideoData > 0 ? (totalSpeedSum / totalLessonsWithVideoData).toFixed(1) : '1.0';
+            avgPlaybackSpeedElement.textContent = `${avgSpeed}x`;
+        }
+        if (totalSeekEventsElement) totalSeekEventsElement.textContent = totalSeekEvents;
+        if (engagementScoreElement) engagementScoreElement.textContent = `${Math.round(engagementScore)}%`;
+    }
+    
     // Render charts
     function renderCharts(enrollments, courses, categoryMap) {
         // Progress distribution chart
@@ -226,6 +296,248 @@ document.addEventListener('DOMContentLoaded', function() {
         if (streakChartContainer) {
             renderStreakChart(analytics);
         }
+    }
+    
+    // Render video analytics charts
+    function renderVideoAnalyticsCharts(analytics) {
+        if (!videoAnalyticsContainer) return;
+        
+        if (!analytics || !analytics.videoDetails) {
+            videoAnalyticsContainer.innerHTML = `
+                <div class="text-center text-gray-500 py-8">
+                    <svg class="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    <p class="mt-2">No video analytics data available yet. Watch some videos to see your engagement metrics!</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Aggregate video analytics data for charts
+        const videoData = aggregateVideoAnalyticsData(analytics.videoDetails);
+        
+        // Render video analytics charts
+        renderVideoEventsChart(videoData);
+        renderPlaybackSpeedChart(videoData);
+        renderEngagementTrendChart(videoData);
+    }
+    
+    // Aggregate video analytics data for charts
+    function aggregateVideoAnalyticsData(videoDetails) {
+        const aggregated = {
+            dailyEvents: {}, // Play/pause events by date
+            speedDistribution: {}, // Playback speed usage
+            engagementTrend: {}, // Engagement score over time
+            lessonEngagement: [] // Engagement by lesson
+        };
+        
+        // Process video details for each course and lesson
+        Object.entries(videoDetails || {}).forEach(([courseId, course]) => {
+            Object.entries(course || {}).forEach(([lessonId, lesson]) => {
+                if (lesson && lesson.lastUpdated) {
+                    const date = lesson.lastUpdated.split('T')[0]; // Extract date part
+                    
+                    // Aggregate daily events
+                    if (!aggregated.dailyEvents[date]) {
+                        aggregated.dailyEvents[date] = { playEvents: 0, pauseEvents: 0, seekEvents: 0 };
+                    }
+                    aggregated.dailyEvents[date].playEvents += lesson.playEvents || 0;
+                    aggregated.dailyEvents[date].pauseEvents += lesson.pauseEvents || 0;
+                    aggregated.dailyEvents[date].seekEvents += lesson.seekEvents || 0;
+                    
+                    // Aggregate speed distribution
+                    const avgSpeed = lesson.playbackSpeedChanges > 0 ? 
+                        (lesson.maxPlaybackSpeed + lesson.minPlaybackSpeed) / 2 : 1.0;
+                    const speedKey = `${Math.floor(avgSpeed * 2) / 2}x`; // Round to nearest 0.5x
+                    aggregated.speedDistribution[speedKey] = (aggregated.speedDistribution[speedKey] || 0) + 1;
+                    
+                    // Calculate engagement for this lesson
+                    const playPauseRatio = (lesson.pauseEvents || 0) > 0 ? 
+                        (lesson.playEvents || 0) / (lesson.pauseEvents || 0) : (lesson.playEvents || 0);
+                    const seekPenalty = Math.min(100, (lesson.seekEvents || 0) / 10);
+                    const engagement = Math.max(0, Math.min(100, (playPauseRatio * 10) - seekPenalty));
+                    
+                    aggregated.lessonEngagement.push({
+                        lessonId,
+                        engagement: Math.round(engagement),
+                        playEvents: lesson.playEvents || 0,
+                        pauseEvents: lesson.pauseEvents || 0
+                    });
+                }
+            });
+        });
+        
+        return aggregated;
+    }
+    
+    // Render video events chart
+    function renderVideoEventsChart(videoData) {
+        const eventsChartContainer = document.getElementById('video-events-chart');
+        if (!eventsChartContainer) return;
+        
+        const dates = Object.keys(videoData.dailyEvents).sort().slice(-14); // Last 14 days
+        if (dates.length === 0) {
+            eventsChartContainer.innerHTML = `
+                <div class="text-center text-gray-500">
+                    <svg class="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    <p class="mt-2">No video events data available</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Prepare data for chart
+        const playEvents = dates.map(date => videoData.dailyEvents[date].playEvents || 0);
+        const pauseEvents = dates.map(date => videoData.dailyEvents[date].pauseEvents || 0);
+        const maxEvents = Math.max(...playEvents, ...pauseEvents, 1);
+        
+        // Generate chart HTML
+        const chartHTML = `
+            <div class="w-full h-full flex flex-col">
+                <div class="flex items-end flex-1 space-x-1 md:space-x-2 px-2 py-4">
+                    ${dates.map((date, index) => {
+                        const playHeight = Math.max(5, (playEvents[index] / maxEvents) * 100);
+                        const pauseHeight = Math.max(5, (pauseEvents[index] / maxEvents) * 100);
+                        const day = new Date(date).getDate();
+                        
+                        return `
+                            <div class="flex flex-col items-center flex-1 group min-w-[25px]">
+                                <div class="flex items-end justify-center w-full space-x-px">
+                                    <div class="w-1/2 bg-blue-500 rounded-t transition-all duration-700 ease-out" 
+                                         style="height: ${playHeight}%" title="Play events: ${playEvents[index]}">
+                                    </div>
+                                    <div class="w-1/2 bg-amber-500 rounded-t transition-all duration-700 ease-out" 
+                                         style="height: ${pauseHeight}%" title="Pause events: ${pauseEvents[index]}">
+                                    </div>
+                                </div>
+                                <div class="text-xs text-gray-600 mt-1 text-center font-semibold">${day}</div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                
+                <div class="mt-4 md:mt-6 text-center">
+                    <p class="text-sm text-gray-600 font-medium">Video Events (Last 14 Days)</p>
+                    <div class="flex justify-center mt-2 space-x-4">
+                        <div class="flex items-center">
+                            <div class="w-3 h-3 bg-blue-500 rounded mr-1"></div>
+                            <span class="text-xs text-gray-600">Play Events</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-3 h-3 bg-amber-500 rounded mr-1"></div>
+                            <span class="text-xs text-gray-600">Pause Events</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        eventsChartContainer.innerHTML = chartHTML;
+    }
+    
+    // Render playback speed chart
+    function renderPlaybackSpeedChart(videoData) {
+        const speedChartContainer = document.getElementById('playback-speed-chart');
+        if (!speedChartContainer) return;
+        
+        const speeds = Object.keys(videoData.speedDistribution).sort();
+        if (speeds.length === 0) {
+            speedChartContainer.innerHTML = `
+                <div class="text-center text-gray-500">
+                    <svg class="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p class="mt-2">No playback speed data available</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Prepare data for chart
+        const counts = speeds.map(speed => videoData.speedDistribution[speed]);
+        const maxCount = Math.max(...counts, 1);
+        
+        // Generate chart HTML
+        const chartHTML = `
+            <div class="w-full h-full flex flex-col">
+                <div class="flex items-end flex-1 space-x-2 md:space-x-3 px-2 py-4">
+                    ${speeds.map((speed, index) => {
+                        const heightPercent = Math.max(10, (counts[index] / maxCount) * 100);
+                        
+                        return `
+                            <div class="flex flex-col items-center flex-1 group min-w-[40px]">
+                                <div class="text-xs text-gray-500 mb-1 font-bold">${counts[index]}</div>
+                                <div class="w-3/4 md:w-3/4 bg-gradient-to-t from-purple-500 to-indigo-600 rounded-t-lg transition-all duration-700 ease-out hover:opacity-90 hover:shadow-lg transform hover:-translate-y-1" 
+                                     style="height: ${heightPercent}%">
+                                </div>
+                                <div class="text-xs text-gray-600 mt-2 text-center truncate w-full px-1 font-semibold">${speed}</div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                
+                <div class="mt-4 md:mt-6 text-center">
+                    <p class="text-sm text-gray-600 font-medium">Playback Speed Distribution</p>
+                </div>
+            </div>
+        `;
+        
+        speedChartContainer.innerHTML = chartHTML;
+    }
+    
+    // Render engagement trend chart
+    function renderEngagementTrendChart(videoData) {
+        const trendChartContainer = document.getElementById('engagement-trend-chart');
+        if (!trendChartContainer) return;
+        
+        // Sort lessons by engagement
+        const sortedLessons = [...videoData.lessonEngagement].sort((a, b) => b.engagement - a.engagement).slice(0, 10);
+        if (sortedLessons.length === 0) {
+            trendChartContainer.innerHTML = `
+                <div class="text-center text-gray-500">
+                    <svg class="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    <p class="mt-2">No engagement data available</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Prepare data for chart
+        const engagements = sortedLessons.map(lesson => lesson.engagement);
+        const maxEngagement = Math.max(...engagements, 1);
+        
+        // Generate chart HTML
+        const chartHTML = `
+            <div class="w-full h-full flex flex-col">
+                <div class="flex items-end flex-1 space-x-1 md:space-x-2 px-2 py-4">
+                    ${sortedLessons.map((lesson, index) => {
+                        const heightPercent = Math.max(5, (engagements[index] / maxEngagement) * 100);
+                        const lessonLabel = `L${index + 1}`; // Simplified label
+                        
+                        return `
+                            <div class="flex flex-col items-center flex-1 group min-w-[20px]">
+                                <div class="text-xs text-gray-500 mb-1 font-bold">${engagements[index]}%</div>
+                                <div class="w-full bg-gradient-to-t from-green-500 to-emerald-600 rounded-t-lg transition-all duration-700 ease-out hover:opacity-90 hover:shadow-lg transform hover:-translate-y-1" 
+                                     style="height: ${heightPercent}%">
+                                </div>
+                                <div class="text-xs text-gray-600 mt-1 text-center font-semibold truncate" title="Lesson ID: ${lesson.lessonId}">${lessonLabel}</div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                
+                <div class="mt-4 md:mt-6 text-center">
+                    <p class="text-sm text-gray-600 font-medium">Top Lessons by Engagement</p>
+                </div>
+            </div>
+        `;
+        
+        trendChartContainer.innerHTML = chartHTML;
     }
     
     // Render progress distribution chart
@@ -864,7 +1176,7 @@ document.addEventListener('DOMContentLoaded', function() {
             patternsContainer.innerHTML = `
                 <div class="text-center text-gray-500">
                     <svg class="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm8-12a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2v-6a2 2 0 00-2-2h-2z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                     </svg>
                     <p class="mt-2">No learning pattern data available</p>
                 </div>
